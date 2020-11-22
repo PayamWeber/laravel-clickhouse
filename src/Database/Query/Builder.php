@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Bavix\LaravelClickHouse\Database\Query;
 
 use Bavix\LaravelClickHouse\Database\Connection;
+use Closure;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Traits\Macroable;
 use Tinderbox\Clickhouse\Common\Format;
 use Tinderbox\ClickhouseBuilder\Query\BaseBuilder;
-use Tinderbox\ClickhouseBuilder\Query\Grammar;
+use Tinderbox\ClickhouseBuilder\Query\JoinClause;
 
 class Builder extends BaseBuilder
 {
@@ -22,7 +23,7 @@ class Builder extends BaseBuilder
 
     public function __construct(
         Connection $connection,
-        Grammar $grammar
+        Grammarr $grammar
     ) {
         $this->connection = $connection;
         $this->grammar = $grammar;
@@ -150,4 +151,71 @@ class Builder extends BaseBuilder
     {
         return $this->connection;
     }
+	
+	/**
+	 * @param             $table
+	 * @param string|null $strict
+	 * @param string|null $type
+	 * @param array|null  $using
+	 * @param bool        $global
+	 * @param string|null $alias
+	 *
+	 * @return $this
+	 */
+	public function joinRaw( $table, string $strict = null, string $type = null, array $using = null, bool $global = false, ?string $alias = null )
+	{
+		$this->join = new JoinClause($this);
+		
+		/*
+		 * If builder instance given, then we assume that sub-query should be used as table in join
+		 */
+		if ($table instanceof BaseBuilder) {
+			$this->join->query($table);
+			
+			$this->files = array_merge($this->files, $table->getFiles());
+		}
+		
+		/*
+		 * If closure given, then we call it and pass From object as argument to
+		 * set up JoinClause object in callback
+		 */
+		if ($table instanceof Closure) {
+			$table($this->join);
+		}
+		
+		/*
+		 * If given anything that is not builder instance or callback. For example, string,
+		 * then we assume that table name was given.
+		 */
+		if (!$table instanceof Closure && !$table instanceof BaseBuilder) {
+			$this->join->table($table);
+		}
+		
+		/*
+		 * If using was given, then merge it with using given before, in closure
+		 */
+		if (!is_null($using)) {
+			$this->join->addUsing($using);
+		}
+		
+		if (!is_null($strict) && is_null($this->join->getStrict())) {
+			$this->join->strict($strict);
+		}
+		
+		if (!is_null($type) && is_null($this->join->getType())) {
+			$this->join->type($type);
+		}
+		
+		if (!is_null($alias) && is_null($this->join->getAlias())) {
+			$this->join->as($alias);
+		}
+		
+		$this->join->distributed($global);
+		
+		if (!is_null($this->join->getSubQuery())) {
+			$this->join->query($this->join->getSubQuery());
+		}
+		
+		return $this;
+	}
 }
